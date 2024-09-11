@@ -2,17 +2,19 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::thread;
 use mime_guess;
+
+fn main() {
+    serve();
+}
 
 pub fn serve() {
     let listener = TcpListener::bind("127.0.0.1:8000").unwrap();
-    println!("Listening on http://127.0.0.1:8000");
-
+    println!("Listening on 127.0.0.1:8000");
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::spawn(|| handle_client(stream));
+                std::thread::spawn(|| handle_client(stream));
             }
             Err(e) => {
                 eprintln!("Connection failed: {}", e);
@@ -24,101 +26,88 @@ pub fn serve() {
 fn handle_client(mut stream: TcpStream) {
     let mut buffer = [0; 1024];
     stream.read(&mut buffer).unwrap();
-
     let request = String::from_utf8_lossy(&buffer[..]);
-    println!("Received request: {}", request); // Log the request
+    let path = request.trim().lines().next().unwrap().split_whitespace().nth(1).unwrap_or("/");
+    let trimmed_path = path.trim_start_matches('/');
 
-    let (status_line, contents) = if request.starts_with("GET / ") || request.starts_with("GET / HTTP/1.1") {
-        serve_directory("./")
-    } else {
-        let path = request.split_whitespace().nth(1).unwrap_or("/");
-        serve_file(path.trim_start_matches('/'))
+    let (status_line, contents) = match request.starts_with("GET ") {
+        true => {
+            if trimmed_path.is_empty() {
+                serve_directory("./")
+            } else {
+                serve_file(trimmed_path)
+            }
+        }
+        _ => (String::from("405 Method Not Allowed"), "Only GET requests are allowed".to_string()),
     };
-
     let response = format!("HTTP/1.1 {}\r\n\r\n{}", status_line, contents);
     stream.write(response.as_bytes()).unwrap();
     stream.flush().unwrap();
 }
 
-// Serve files or directories based on the request path
-fn serve_file(path: &str) -> (&str, String) {
-    let path = Path::new(path);
+fn serve_file(path: &str) -> (String, String) {
+    let current_dir = std::env::current_dir().unwrap();
+    let full_path = current_dir.join(path);
 
-    if path.is_file() {
-        match fs::read(&path) {
+    if full_path.is_file() {
+        match fs::read(&full_path) {
             Ok(contents) => {
-                let mime_type = mime_guess::from_path(&path)
+                let mime_type = mime_guess::from_path(&full_path)
                     .first_or_octet_stream()
-                    .to_string(); // Fixed conversion to &str
-
+                    .as_ref()
+                    .to_string();
                 (
-                    "200 OK",
-                    format!(
-                        "Content-Type: {}\r\n\r\n{}",
-                        mime_type,
-                        String::from_utf8_lossy(&contents)
-                    ),
+                    "200 OK".to_string(),
+                    format!("Content-Type: {}\r\n\r\n{}", mime_type, String::from_utf8_lossy(&contents)),
                 )
             }
-            Err(_) => ("404 NOT FOUND", "File not found".to_string()),
+            Err(_) => ("404 NOT FOUND".to_string(), "File not found".to_string()),
         }
     } else {
-        ("404 NOT FOUND", "File not found".to_string())
+        serve_directory(path)
     }
 }
 
-// Serve directory as HTML
-fn serve_directory(path: &str) -> (&str, String) {
-    let path = PathBuf::from(path);
-
-    if path.is_dir() || path.as_os_str().is_empty() {
+fn serve_directory(path: &str) -> (String, String) {
+    let full_path = PathBuf::from(path);
+    if full_path.is_dir() {
         let mut html = String::new();
         html.push_str(
             r#"
             <html>
             <head>
-                <link rel="stylesheet" type="text/css" href="/static/styles.css">
+            <title>Directory Listing</title>
+            <link rel="stylesheet" type="text/css" href="/static/styles.css">
             </head>
             <body>
-                <h1>Directory listing</h1>
-                <div id="directory-content">
+            <h1>Directory listing</h1>
+            <ul>
             "#,
         );
-
-        // Show the parent directory link only if not at the root
-        if let Some(parent) = path.parent() {
-            let parent_href = parent.to_str().unwrap_or("/");
-            html.push_str(&format!(
-                "<ul><li><a href=\"{}\">Parent Directory</a></li>",
-                parent_href
-            ));
+        // This handles the root and parent directory links
+        let root = if path.is_empty() { "." } else { path };
+        if !path.is_empty() {
+            html.push_str("<li><a href=\"../\">Parent Directory</a></li>");
         }
 
-        // List directory entries
         let mut entries = vec![];
-        match fs::read_dir(&path) {
-            Ok(dir_entries) => {
-                for entry in dir_entries {
-                    match entry {
-                        Ok(entry) => {
-                            let entry_name = entry.file_name();
-                            let file_name = entry_name.to_string_lossy().into_owned();
-                            let href = format!("{}", file_name);
-                            entries.push(format!("<li><a href=\"/{href}\">{file_name}</a></li>"));
-                        }
-                        Err(_) => continue, // Skip unreadable entries
-                    }
+        if let Ok(entries_iter) = fs::read_dir(&full_path) {
+            for entry in entries_iter {
+                if let Ok(entry) = entry {
+                    let entry_name = entry.file_name();
+                    let file_name = entry_name.to_string_lossy().into_owned();
+                    let href = format!("{}/{}", root, file_name);
+
+                    // This adds the file or directory entry to the list
+                    entries.push(format!("<li><a href=\"/{}\">{}</a></li>", href, file_name));
                 }
             }
-            Err(_) => return ("404 NOT FOUND", "Directory not found".to_string()),
         }
-
         entries.sort();
         html.push_str(&entries.join(""));
-        html.push_str("</ul></div></body></html>");
-
-        ("200 OK", html)
+        html.push_str("</ul></body></html>");
+        ("200 OK".to_string(), html)
     } else {
-        ("404 NOT FOUND", "Directory not found".to_string())
+        ("404 NOT FOUND".to_string(), "Directory not found".to_string())
     }
 }
