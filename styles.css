@@ -1,0 +1,41 @@
+body {
+  font-family: Arial, sans-serif;
+}
+.directory-card {
+  border: 1px solid #ddd;
+  padding: 10px;
+  margin-bottom: 10px;
+  border-radius: 5px;
+  box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+}
+.directory-card table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.directory-card th, .directory-card td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+}
+.directory-card th {
+  background-color: #f2f2f2;
+}
+.directory-icon {
+  width: 20px;
+  height: 20px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.file-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+a {
+  text-decoration: none;
+  color: #007bff;
+}
+a:hover {
+  text-decoration: underline;
+}
